@@ -48,6 +48,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(DefaultChannelPipeline.class);
     private static final String HEAD_NAME = generateName0(HeadHandler.class);
     private static final String TAIL_NAME = generateName0(TailHandler.class);
+
     private static final ChannelHandler HEAD_HANDLER = new HeadHandler();
     private static final ChannelHandler TAIL_HANDLER = new TailHandler();
 
@@ -64,6 +65,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
                     DefaultChannelPipeline.class, MessageSizeEstimator.Handle.class, "estimatorHandle");
     private final DefaultChannelHandlerContext head;
     private final DefaultChannelHandlerContext tail;
+
     private final Channel channel;
     private final ChannelFuture succeededFuture;
     private final VoidChannelPromise voidPromise;
@@ -496,17 +498,12 @@ public class DefaultChannelPipeline implements ChannelPipeline {
         return (T) ctx.handler();
     }
 
-    private void unlink(DefaultChannelHandlerContext ctx) {
-        assert ctx != head && ctx != tail;
-        DefaultChannelHandlerContext prev = ctx.prev;
-        DefaultChannelHandlerContext next = ctx.next;
-        prev.next = next;
-        next.prev = prev;
-    }
-
     private void remove0(DefaultChannelHandlerContext ctx) {
-        unlink(ctx);
-        callHandlerRemoved0(ctx);
+        try {
+            callHandlerRemoved0(ctx);
+        } finally {
+            ctx.remove(true);
+        }
     }
 
     @Override
@@ -586,11 +583,16 @@ public class DefaultChannelPipeline implements ChannelPipeline {
         oldCtx.prev = newCtx;
         oldCtx.next = newCtx;
 
-        // Invoke newHandler.handlerAdded() first (i.e. before oldHandler.handlerRemoved() is invoked)
-        // because callHandlerRemoved() will trigger channelRead() or flush() on newHandler and those
-        // event handlers must be called after handlerAdded().
-        callHandlerAdded0(newCtx);
-        callHandlerRemoved0(oldCtx);
+        //oldCtx.setRemovalStarted();
+        try {
+            // Invoke newHandler.handlerAdded() first (i.e. before oldHandler.handlerRemoved() is invoked)
+            // because callHandlerRemoved() will trigger channelRead() or flush() on newHandler and those
+            // event handlers must be called after handlerAdded().
+            callHandlerAdded0(newCtx);
+            callHandlerRemoved0(oldCtx);
+        } finally {
+            oldCtx.remove(false);
+        }
     }
 
     private static void checkMultiplicity(ChannelHandler handler) {
@@ -615,7 +617,6 @@ public class DefaultChannelPipeline implements ChannelPipeline {
                     handlers.remove(ctx);
                 }
 
-                unlink(ctx);
                 ctx.callHandlerRemoved();
 
                 removed = true;
@@ -623,6 +624,8 @@ public class DefaultChannelPipeline implements ChannelPipeline {
                 if (logger.isWarnEnabled()) {
                     logger.warn("Failed to remove a handler: " + ctx.name(), t2);
                 }
+            } finally {
+                ctx.remove(true);
             }
 
             if (removed) {
@@ -736,22 +739,66 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
     @Override
     public ChannelHandler removeFirst() {
+        final DefaultChannelHandlerContext ctx;
+        EventExecutor executor = executor();
+        boolean inEventLoop = executor.inEventLoop();
         synchronized (handlers) {
             if (handlers.isEmpty()) {
                 throw new NoSuchElementException();
             }
-            return handlers.remove(0).handler();
+            int idx = 0;
+
+            ctx = handlers.remove(idx);
+            assert ctx != null;
+
+            if (!inEventLoop) {
+                try {
+                    executor.execute(() -> remove0(ctx));
+                    return ctx.handler();
+                } catch (Throwable cause) {
+                    handlers.add(idx, ctx);
+                    throw cause;
+                }
+            }
         }
+        remove0(ctx);
+        return ctx.handler();
     }
 
     @Override
     public ChannelHandler removeLast() {
+        ChannelHandler handler = removeLastSafe();
+        if (handler == null) {
+            throw new NoSuchElementException();
+        }
+        return handler;
+    }
+
+    private ChannelHandler removeLastSafe() {
+        final DefaultChannelHandlerContext ctx;
+        EventExecutor executor = executor();
+        boolean inEventLoop = executor.inEventLoop();
         synchronized (handlers) {
             if (handlers.isEmpty()) {
-                throw new NoSuchElementException();
+                return null;
             }
-            return handlers.remove(handlers.size() - 1).handler();
+            int idx = handlers.size() - 1;
+
+            ctx = handlers.remove(idx);
+            assert ctx != null;
+
+            if (!inEventLoop) {
+                try {
+                    executor.execute(() -> remove0(ctx));
+                    return ctx.handler();
+                } catch (Throwable cause) {
+                    handlers.add(idx, ctx);
+                    throw cause;
+                }
+            }
         }
+        remove0(ctx);
+        return ctx.handler();
     }
 
     @Override
@@ -813,174 +860,169 @@ public class DefaultChannelPipeline implements ChannelPipeline {
         return this;
     }
 
-    /**
-     * Removes all handlers from the pipeline one by one from tail (exclusive) to head (exclusive) to trigger
-     * handlerRemoved().
-     */
-    private void destroy() {
+    @Override
+    public ChannelPipeline removeAll() {
         EventExecutor executor = executor();
         if (executor.inEventLoop()) {
-            destroy0();
-        } else {
-            executor.execute(this::destroy0);
-        }
-    }
-
-    private void destroy0() {
-        assert executor().inEventLoop();
-        DefaultChannelHandlerContext ctx = this.tail.prev;
-        while (ctx != head) {
-            synchronized (handlers) {
-                handlers.remove(ctx);
+            DefaultChannelHandlerContext ctx = this.tail.prev;
+            while (ctx != head) {
+                synchronized (handlers) {
+                    handlers.remove(ctx);
+                }
+                DefaultChannelHandlerContext prev = ctx.prev;
+                remove0(ctx);
+                ctx = prev;
             }
-            remove0(ctx);
-
-            ctx = ctx.prev;
+        } else {
+            while (removeLastSafe() != null) {
+                // Remove all handlers until none is left.
+            }
         }
+        return this;
     }
 
     @Override
-    public final ChannelPipeline fireChannelActive() {
+    public ChannelPipeline fireChannelActive() {
         head.invokeChannelActive();
         return this;
     }
 
     @Override
-    public final ChannelPipeline fireChannelInactive() {
+    public ChannelPipeline fireChannelInactive() {
         head.invokeChannelInactive();
         return this;
     }
 
     @Override
-    public final ChannelPipeline fireExceptionCaught(Throwable cause) {
+    public ChannelPipeline fireExceptionCaught(Throwable cause) {
         head.invokeExceptionCaught(cause);
         return this;
     }
 
     @Override
-    public final ChannelPipeline fireUserEventTriggered(Object event) {
+    public ChannelPipeline fireUserEventTriggered(Object event) {
         head.invokeUserEventTriggered(event);
         return this;
     }
 
     @Override
-    public final ChannelPipeline fireChannelRead(Object msg) {
+    public ChannelPipeline fireChannelRead(Object msg) {
         head.invokeChannelRead(msg);
         return this;
     }
 
     @Override
-    public final ChannelPipeline fireChannelReadComplete() {
+    public ChannelPipeline fireChannelReadComplete() {
         head.invokeChannelReadComplete();
         return this;
     }
 
     @Override
-    public final ChannelPipeline fireChannelWritabilityChanged() {
+    public ChannelPipeline fireChannelWritabilityChanged() {
         head.invokeChannelWritabilityChanged();
         return this;
     }
 
     @Override
-    public final ChannelFuture bind(SocketAddress localAddress) {
+    public ChannelFuture bind(SocketAddress localAddress) {
         return tail.bind(localAddress);
     }
 
     @Override
-    public final ChannelFuture connect(SocketAddress remoteAddress) {
+    public ChannelFuture connect(SocketAddress remoteAddress) {
         return tail.connect(remoteAddress);
     }
 
     @Override
-    public final ChannelFuture connect(SocketAddress remoteAddress, SocketAddress localAddress) {
+    public ChannelFuture connect(SocketAddress remoteAddress, SocketAddress localAddress) {
         return tail.connect(remoteAddress, localAddress);
     }
 
     @Override
-    public final ChannelFuture disconnect() {
+    public ChannelFuture disconnect() {
         return tail.disconnect();
     }
 
     @Override
-    public final ChannelFuture close() {
+    public ChannelFuture close() {
         return tail.close();
     }
 
     @Override
-    public final ChannelFuture register() {
+    public ChannelFuture register() {
         return tail.register();
     }
 
     @Override
-    public final ChannelFuture deregister() {
+    public ChannelFuture deregister() {
         return tail.deregister();
     }
 
     @Override
-    public final ChannelPipeline flush() {
+    public ChannelPipeline flush() {
         tail.flush();
         return this;
     }
 
     @Override
-    public final ChannelFuture bind(SocketAddress localAddress, ChannelPromise promise) {
+    public ChannelFuture bind(SocketAddress localAddress, ChannelPromise promise) {
         return tail.bind(localAddress, promise);
     }
 
     @Override
-    public final ChannelFuture connect(SocketAddress remoteAddress, ChannelPromise promise) {
+    public ChannelFuture connect(SocketAddress remoteAddress, ChannelPromise promise) {
         return tail.connect(remoteAddress, promise);
     }
 
     @Override
-    public final ChannelFuture connect(
+    public ChannelFuture connect(
             SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise) {
         return tail.connect(remoteAddress, localAddress, promise);
     }
 
     @Override
-    public final ChannelFuture disconnect(ChannelPromise promise) {
+    public ChannelFuture disconnect(ChannelPromise promise) {
         return tail.disconnect(promise);
     }
 
     @Override
-    public final ChannelFuture close(ChannelPromise promise) {
+    public ChannelFuture close(ChannelPromise promise) {
         return tail.close(promise);
     }
 
     @Override
-    public final ChannelFuture register(final ChannelPromise promise) {
+    public ChannelFuture register(final ChannelPromise promise) {
         return tail.register(promise);
     }
 
     @Override
-    public final ChannelFuture deregister(final ChannelPromise promise) {
+    public ChannelFuture deregister(final ChannelPromise promise) {
         return tail.deregister(promise);
     }
 
     @Override
-    public final ChannelPipeline read() {
+    public ChannelPipeline read() {
         tail.read();
         return this;
     }
 
     @Override
-    public final ChannelFuture write(Object msg) {
+    public ChannelFuture write(Object msg) {
         return tail.write(msg);
     }
 
     @Override
-    public final ChannelFuture write(Object msg, ChannelPromise promise) {
+    public ChannelFuture write(Object msg, ChannelPromise promise) {
         return tail.write(msg, promise);
     }
 
     @Override
-    public final ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) {
+    public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) {
         return tail.writeAndFlush(msg, promise);
     }
 
     @Override
-    public final ChannelFuture writeAndFlush(Object msg) {
+    public ChannelFuture writeAndFlush(Object msg) {
         return tail.writeAndFlush(msg);
     }
 
@@ -1195,16 +1237,6 @@ public class DefaultChannelPipeline implements ChannelPipeline {
         @Override
         public void flush(ChannelHandlerContext ctx) {
             ctx.channel().unsafe().flush();
-        }
-
-        @Override
-        public void channelUnregistered(ChannelHandlerContext ctx) {
-            ctx.fireChannelUnregistered();
-
-            // Remove all handlers sequentially if channel is closed and unregistered.
-            if (!ctx.channel().isOpen()) {
-                ((DefaultChannelPipeline) ctx.pipeline()).destroy();
-            }
         }
     }
 }

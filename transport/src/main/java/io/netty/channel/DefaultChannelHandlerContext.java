@@ -90,7 +90,6 @@ final class DefaultChannelHandlerContext implements ChannelHandlerContext, Resou
     }
 
     private void fireHandlerRemoved(Throwable cause) {
-        //logger.warn("Handler " + this + " already removed", newRemovedException(this, cause));
         pipeline().fireExceptionCaught(newRemovedException(this, cause));
     }
 

@@ -583,7 +583,6 @@ public class DefaultChannelPipeline implements ChannelPipeline {
         oldCtx.prev = newCtx;
         oldCtx.next = newCtx;
 
-        //oldCtx.setRemovalStarted();
         try {
             // Invoke newHandler.handlerAdded() first (i.e. before oldHandler.handlerRemoved() is invoked)
             // because callHandlerRemoved() will trigger channelRead() or flush() on newHandler and those
@@ -882,106 +881,106 @@ public class DefaultChannelPipeline implements ChannelPipeline {
     }
 
     @Override
-    public ChannelPipeline fireChannelActive() {
+    public final ChannelPipeline fireChannelActive() {
         head.invokeChannelActive();
         return this;
     }
 
     @Override
-    public ChannelPipeline fireChannelInactive() {
+    public final ChannelPipeline fireChannelInactive() {
         head.invokeChannelInactive();
         return this;
     }
 
     @Override
-    public ChannelPipeline fireExceptionCaught(Throwable cause) {
+    public final ChannelPipeline fireExceptionCaught(Throwable cause) {
         head.invokeExceptionCaught(cause);
         return this;
     }
 
     @Override
-    public ChannelPipeline fireUserEventTriggered(Object event) {
+    public final ChannelPipeline fireUserEventTriggered(Object event) {
         head.invokeUserEventTriggered(event);
         return this;
     }
 
     @Override
-    public ChannelPipeline fireChannelRead(Object msg) {
+    public final ChannelPipeline fireChannelRead(Object msg) {
         head.invokeChannelRead(msg);
         return this;
     }
 
     @Override
-    public ChannelPipeline fireChannelReadComplete() {
+    public final ChannelPipeline fireChannelReadComplete() {
         head.invokeChannelReadComplete();
         return this;
     }
 
     @Override
-    public ChannelPipeline fireChannelWritabilityChanged() {
+    public final ChannelPipeline fireChannelWritabilityChanged() {
         head.invokeChannelWritabilityChanged();
         return this;
     }
 
     @Override
-    public ChannelFuture bind(SocketAddress localAddress) {
+    public final ChannelFuture bind(SocketAddress localAddress) {
         return tail.bind(localAddress);
     }
 
     @Override
-    public ChannelFuture connect(SocketAddress remoteAddress) {
+    public final ChannelFuture connect(SocketAddress remoteAddress) {
         return tail.connect(remoteAddress);
     }
 
     @Override
-    public ChannelFuture connect(SocketAddress remoteAddress, SocketAddress localAddress) {
+    public final ChannelFuture connect(SocketAddress remoteAddress, SocketAddress localAddress) {
         return tail.connect(remoteAddress, localAddress);
     }
 
     @Override
-    public ChannelFuture disconnect() {
+    public final ChannelFuture disconnect() {
         return tail.disconnect();
     }
 
     @Override
-    public ChannelFuture close() {
+    public final ChannelFuture close() {
         return tail.close();
     }
 
     @Override
-    public ChannelFuture register() {
+    public final ChannelFuture register() {
         return tail.register();
     }
 
     @Override
-    public ChannelFuture deregister() {
+    public final ChannelFuture deregister() {
         return tail.deregister();
     }
 
     @Override
-    public ChannelPipeline flush() {
+    public final ChannelPipeline flush() {
         tail.flush();
         return this;
     }
 
     @Override
-    public ChannelFuture bind(SocketAddress localAddress, ChannelPromise promise) {
+    public final ChannelFuture bind(SocketAddress localAddress, ChannelPromise promise) {
         return tail.bind(localAddress, promise);
     }
 
     @Override
-    public ChannelFuture connect(SocketAddress remoteAddress, ChannelPromise promise) {
+    public final ChannelFuture connect(SocketAddress remoteAddress, ChannelPromise promise) {
         return tail.connect(remoteAddress, promise);
     }
 
     @Override
-    public ChannelFuture connect(
+    public final ChannelFuture connect(
             SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise) {
         return tail.connect(remoteAddress, localAddress, promise);
     }
 
     @Override
-    public ChannelFuture disconnect(ChannelPromise promise) {
+    public final ChannelFuture disconnect(ChannelPromise promise) {
         return tail.disconnect(promise);
     }
 
@@ -991,38 +990,38 @@ public class DefaultChannelPipeline implements ChannelPipeline {
     }
 
     @Override
-    public ChannelFuture register(final ChannelPromise promise) {
+    public final ChannelFuture register(final ChannelPromise promise) {
         return tail.register(promise);
     }
 
     @Override
-    public ChannelFuture deregister(final ChannelPromise promise) {
+    public final ChannelFuture deregister(final ChannelPromise promise) {
         return tail.deregister(promise);
     }
 
     @Override
-    public ChannelPipeline read() {
+    public final ChannelPipeline read() {
         tail.read();
         return this;
     }
 
     @Override
-    public ChannelFuture write(Object msg) {
+    public final ChannelFuture write(Object msg) {
         return tail.write(msg);
     }
 
     @Override
-    public ChannelFuture write(Object msg, ChannelPromise promise) {
+    public final ChannelFuture write(Object msg, ChannelPromise promise) {
         return tail.write(msg, promise);
     }
 
     @Override
-    public ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) {
+    public final ChannelFuture writeAndFlush(Object msg, ChannelPromise promise) {
         return tail.writeAndFlush(msg, promise);
     }
 
     @Override
-    public ChannelFuture writeAndFlush(Object msg) {
+    public final ChannelFuture writeAndFlush(Object msg) {
         return tail.writeAndFlush(msg);
     }
 

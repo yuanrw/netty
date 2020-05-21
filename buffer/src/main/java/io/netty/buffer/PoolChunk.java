@@ -294,16 +294,18 @@ final class PoolChunk<T> implements PoolChunkMetric {
         if (sizeIdx <= arena.smallMaxSizeIdx) {
             // small
             handle = allocateSubpage(sizeIdx);
+            if (handle < 0) {
+                return false;
+            }
             assert isSubpage(handle);
         } else {
             // normal
             // runSize must be multiple of pageSize
             int runSize = arena.sizeIdx2size(sizeIdx);
             handle = allocateRun(runSize);
-        }
-
-        if (handle < 0) {
-            return false;
+            if (handle < 0) {
+                return false;
+            }
         }
 
         ByteBuffer nioBuffer = cachedNioBuffers != null? cachedNioBuffers.pollLast() : null;
